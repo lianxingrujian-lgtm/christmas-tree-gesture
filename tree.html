@@ -1,0 +1,1737 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover">
+    <title>全平台手势控制3D圣诞树</title>
+    <link rel="apple-touch-icon" sizes="180x180" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎄</text></svg>">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎄</text></svg>">
+    <!-- MediaPipe CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    
+    <style>
+        /* 基础重置 */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+            -webkit-touch-callout: none;
+        }
+        
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Helvetica Neue', sans-serif;
+            color: #fff;
+        }
+        
+        /* 安全区域适配 */
+        @supports (padding-top: env(safe-area-inset-top)) {
+            body {
+                padding-top: env(safe-area-inset-top);
+                padding-bottom: env(safe-area-inset-bottom);
+                padding-left: env(safe-area-inset-left);
+                padding-right: env(safe-area-inset-right);
+            }
+        }
+        
+        /* 设备自适应布局 */
+        .container {
+            position: fixed;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        /* 顶部标题栏 */
+        .header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .title {
+            font-size: 20px;
+            font-weight: 700;
+            background: linear-gradient(45deg, #FFD700, #FFA500, #32CD32, #FFD700);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            background-size: 200% auto;
+            animation: shimmer 3s ease-in-out infinite;
+        }
+        
+        @keyframes shimmer {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+        
+        /* 3D画布区域 */
+        #threeCanvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            outline: none;
+            z-index: 1;
+        }
+        
+        /* 控制面板 - 设备自适应 */
+        .controls-panel {
+            position: fixed;
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 215, 0, 0.3);
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            transition: all 0.3s ease;
+        }
+        
+        /* 桌面端布局 */
+        @media (min-width: 1024px) {
+            .controls-panel {
+                top: 80px;
+                left: 20px;
+                width: 320px;
+            }
+            .camera-feed {
+                top: 80px;
+                right: 20px;
+                width: 240px;
+                height: 180px;
+            }
+        }
+        
+        /* 平板端布局 */
+        @media (min-width: 768px) and (max-width: 1024px) {
+            .controls-panel {
+                bottom: 20px;
+                left: 50%;
+                transform: translateX(-50%);
+                width: 90%;
+                max-width: 600px;
+            }
+            .camera-feed {
+                top: 80px;
+                right: 20px;
+                width: 200px;
+                height: 150px;
+            }
+        }
+        
+        /* 手机端布局 */
+        @media (max-width: 767px) {
+            .controls-panel {
+                bottom: 0;
+                left: 0;
+                right: 0;
+                width: 100%;
+                border-radius: 24px 24px 0 0;
+                padding: 16px;
+            }
+            .camera-feed {
+                top: 60px;
+                right: 10px;
+                width: 120px;
+                height: 90px;
+                opacity: 0.7;
+            }
+        }
+        
+        /* 摄像头视频流 */
+        .camera-feed {
+            position: fixed;
+            z-index: 1000;
+            border: 2px solid rgba(255, 215, 0, 0.5);
+            border-radius: 12px;
+            overflow: hidden;
+            background: #000;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
+        
+        .camera-feed video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* 镜像翻转 */
+        }
+        
+        .camera-feed canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        
+        /* 控制组 */
+        .control-group {
+            margin-bottom: 20px;
+        }
+        
+        .control-group:last-child {
+            margin-bottom: 0;
+        }
+        
+        .control-group h3 {
+            color: #FFD700;
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .control-group h3 i {
+            font-size: 18px;
+        }
+        
+        /* 按钮样式 */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            background: rgba(255, 215, 0, 0.15);
+            border: 1.5px solid #FFD700;
+            color: #FFD700;
+            padding: 12px 20px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            width: 100%;
+            margin-bottom: 8px;
+        }
+        
+        .btn:hover, .btn:active {
+            background: rgba(255, 215, 0, 0.3);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(255, 215, 0, 0.2);
+        }
+        
+        .btn:active {
+            transform: translateY(0);
+        }
+        
+        .btn i {
+            font-size: 16px;
+        }
+        
+        /* 音乐控制按钮组 */
+        .music-controls {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+        }
+        
+        .music-btn {
+            aspect-ratio: 1;
+            padding: 0;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(30, 30, 30, 0.8);
+            font-size: 16px;
+        }
+        
+        /* 手势指示器 */
+        .gesture-indicator {
+            position: fixed;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 215, 0, 0.3);
+            border-radius: 16px;
+            padding: 16px;
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+        
+        @media (max-width: 767px) {
+            .gesture-indicator {
+                bottom: 150px;
+                flex-wrap: wrap;
+                justify-content: center;
+                width: 90%;
+            }
+        }
+        
+        .gesture-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 14px;
+        }
+        
+        .gesture-icon {
+            width: 36px;
+            height: 36px;
+            background: rgba(255, 215, 0, 0.1);
+            border: 1px solid #FFD700;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+        
+        /* 加载界面 */
+        .loader {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            transition: opacity 0.5s ease;
+        }
+        
+        .spinner {
+            width: 60px;
+            height: 60px;
+            border: 3px solid rgba(255, 215, 0, 0.1);
+            border-top: 3px solid #FFD700;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .loader-text {
+            color: #FFD700;
+            font-size: 16px;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        
+        .loader-subtext {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 14px;
+            text-align: center;
+        }
+        
+        /* 设备状态指示器 */
+        .device-status {
+            position: fixed;
+            top: 12px;
+            right: 20px;
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 6px 12px;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.7);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .device-status i {
+            font-size: 14px;
+        }
+        
+        /* 果冻背景 */
+        .jelly-background {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            background: linear-gradient(45deg, #0a0a0a, #1a1a2e, #16213e);
+            animation: jellyEffect 8s ease-in-out infinite;
+            background-size: 400% 400%;
+        }
+        
+        @keyframes jellyEffect {
+            0%, 100% {
+                background-position: 0% 50%;
+                transform: scale(1);
+            }
+            25% {
+                background-position: 50% 100%;
+                transform: scale(1.02);
+            }
+            50% {
+                background-position: 100% 50%;
+                transform: scale(0.98);
+            }
+            75% {
+                background-position: 50% 0%;
+                transform: scale(1.01);
+            }
+        }
+        
+        /* 圣诞快乐文字 */
+        .christmas-text {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: min(10vw, 80px);
+            font-weight: 900;
+            background: linear-gradient(45deg, #ff6b6b, #ffa502, #fceea7, #2ed573);
+            background-size: 300% 300%;
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            animation: textShimmer 4s ease infinite;
+            text-align: center;
+            pointer-events: none;
+            z-index: -1;
+            opacity: 0.1;
+            text-shadow: 0 0 30px rgba(255, 215, 0, 0.3);
+        }
+        
+        @keyframes textShimmer {
+            0%, 100% {
+                background-position: 0% 50%;
+            }
+            50% {
+                background-position: 100% 50%;
+            }
+        }
+        
+        /* === 新手教程样式 === */
+        .tutorial-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.95);
+            backdrop-filter: blur(20px);
+            z-index: 3000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.5s ease;
+        }
+        
+        .tutorial-overlay.active {
+            opacity: 1;
+            pointer-events: all;
+        }
+        
+        .tutorial-content {
+            max-width: 600px;
+            width: 100%;
+            background: rgba(20, 20, 20, 0.95);
+            border: 2px solid #FFD700;
+            border-radius: 24px;
+            padding: 40px;
+            text-align: center;
+            animation: tutorialAppear 0.6s ease-out;
+        }
+        
+        @keyframes tutorialAppear {
+            0% {
+                opacity: 0;
+                transform: translateY(20px) scale(0.95);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+        
+        .tutorial-header {
+            margin-bottom: 30px;
+        }
+        
+        .tutorial-title {
+            font-size: 32px;
+            font-weight: 700;
+            background: linear-gradient(45deg, #FFD700, #FFA500, #32CD32);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            margin-bottom: 10px;
+        }
+        
+        .tutorial-subtitle {
+            font-size: 16px;
+            color: rgba(255, 255, 255, 0.7);
+            line-height: 1.6;
+        }
+        
+        .tutorial-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+        
+        .tutorial-step {
+            display: flex;
+            align-items: flex-start;
+            text-align: left;
+            gap: 20px;
+        }
+        
+        .step-number {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, #FFD700, #FFA500);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 18px;
+            color: #000;
+            flex-shrink: 0;
+        }
+        
+        .step-content {
+            flex: 1;
+        }
+        
+        .step-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #FFD700;
+            margin-bottom: 8px;
+        }
+        
+        .step-description {
+            font-size: 15px;
+            color: rgba(255, 255, 255, 0.8);
+            line-height: 1.6;
+        }
+        
+        .gesture-demo {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-top: 10px;
+            padding: 12px;
+            background: rgba(255, 215, 0, 0.1);
+            border-radius: 12px;
+        }
+        
+        .gesture-emoji {
+            font-size: 40px;
+            width: 60px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            flex-shrink: 0;
+        }
+        
+        .gesture-text {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.9);
+            text-align: left;
+        }
+        
+        .tutorial-footer {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            align-items: center;
+        }
+        
+        .device-tip {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.6);
+            padding: 10px 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            margin-bottom: 10px;
+        }
+        
+        .tutorial-btn {
+            background: linear-gradient(135deg, #FFD700, #FFA500);
+            border: none;
+            color: #000;
+            padding: 16px 40px;
+            border-radius: 12px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-width: 200px;
+        }
+        
+        .tutorial-btn:hover, .tutorial-btn:active {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(255, 215, 0, 0.3);
+        }
+        
+        .skip-tutorial {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: rgba(255, 255, 255, 0.7);
+            padding: 12px 24px;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        
+        .skip-tutorial:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        
+        /* 响应式教程 */
+        @media (max-width: 768px) {
+            .tutorial-content {
+                padding: 30px 20px;
+                margin: 0 10px;
+            }
+            
+            .tutorial-title {
+                font-size: 24px;
+            }
+            
+            .tutorial-step {
+                flex-direction: column;
+                gap: 10px;
+            }
+            
+            .step-number {
+                align-self: flex-start;
+            }
+            
+            .gesture-demo {
+                flex-direction: column;
+                text-align: center;
+                gap: 10px;
+            }
+            
+            .gesture-emoji {
+                width: 50px;
+                height: 50px;
+                font-size: 30px;
+            }
+            
+            .tutorial-btn {
+                padding: 14px 30px;
+                font-size: 16px;
+            }
+        }
+        
+        /* 设备特定提示 */
+        .device-specific {
+            display: none;
+        }
+        
+        .device-mac .device-specific.mac,
+        .device-ipad .device-specific.ipad,
+        .device-iphone .device-specific.iphone {
+            display: block;
+        }
+        
+        /* 隐藏/显示控制 */
+        .toggle-ui {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1000;
+            width: 44px;
+            height: 44px;
+            background: rgba(0, 0, 0, 0.8);
+            border: 1px solid rgba(255, 215, 0, 0.3);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 20px;
+            color: #FFD700;
+        }
+        
+        /* 响应式调整 */
+        @media (max-height: 600px) {
+            .gesture-indicator {
+                bottom: 80px;
+            }
+            .controls-panel {
+                padding: 12px;
+            }
+            
+            .tutorial-content {
+                padding: 20px;
+                max-height: 90vh;
+                overflow-y: auto;
+            }
+            
+            .tutorial-steps {
+                gap: 20px;
+            }
+        }
+        
+        /* 错误提示 */
+        .error-message {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 71, 87, 0.9);
+            color: white;
+            padding: 20px 30px;
+            border-radius: 15px;
+            text-align: center;
+            z-index: 2000;
+            max-width: 90%;
+            backdrop-filter: blur(20px);
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <!-- 果冻背景 -->
+    <div class="jelly-background"></div>
+    
+    <!-- 圣诞快乐文字 -->
+    <div class="christmas-text">MERRY CHRISTMAS</div>
+    
+    <!-- 新手教程遮罩层 -->
+    <div class="tutorial-overlay" id="tutorialOverlay">
+        <div class="tutorial-content">
+            <div class="tutorial-header">
+                <h1 class="tutorial-title">🎄 欢迎使用手势圣诞树</h1>
+                <p class="tutorial-subtitle">通过摄像头手势控制3D圣诞树的神奇体验</p>
+            </div>
+            
+            <div class="tutorial-steps">
+                <div class="tutorial-step">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <h3 class="step-title">开启摄像头权限</h3>
+                        <p class="step-description">
+                            应用需要访问您的摄像头来识别手势。请确保摄像头已开启并保持良好光照。
+                            <div class="device-tip">
+                                <span class="device-specific mac">💡 Mac用户：建议使用前置摄像头，确保脸部光线充足</span>
+                                <span class="device-specific ipad">💡 iPad用户：可以使用前置或后置摄像头，保持手臂在画面中</span>
+                                <span class="device-specific iphone">💡 iPhone用户：使用前置摄像头，将手机放在稳定位置</span>
+                            </div>
+                        </p>
+                    </div>
+                </div>
+                
+                <div class="tutorial-step">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <h3 class="step-title">学习基本手势</h3>
+                        <p class="step-description">使用以下手势控制圣诞树：</p>
+                        
+                        <div class="gesture-demo">
+                            <div class="gesture-emoji">✊</div>
+                            <div class="gesture-text">
+                                <strong>握拳手势</strong><br>
+                                粒子会聚合成圣诞树形状
+                            </div>
+                        </div>
+                        
+                        <div class="gesture-demo">
+                            <div class="gesture-emoji">👋</div>
+                            <div class="gesture-text">
+                                <strong>张开手掌</strong><br>
+                                粒子会散开成星云效果
+                            </div>
+                        </div>
+                        
+                        <div class="gesture-demo">
+                            <div class="gesture-emoji">🤏</div>
+                            <div class="gesture-text">
+                                <strong>捏合手势</strong><br>
+                                聚焦到照片位置
+                            </div>
+                        </div>
+                        
+                        <div class="gesture-demo">
+                            <div class="gesture-emoji">✋</div>
+                            <div class="gesture-text">
+                                <strong>移动手掌</strong><br>
+                                旋转3D场景视角
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="tutorial-step">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <h3 class="step-title">最佳体验建议</h3>
+                        <p class="step-description">
+                            • 保持手臂在摄像头画面中心<br>
+                            • 确保背景不杂乱，避免干扰识别<br>
+                            • 手势动作可以慢一点，让系统准确识别<br>
+                            • 如果手势不灵敏，可以重新调整位置
+                        </p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="tutorial-footer">
+                <div class="device-tip">
+                    <span class="device-specific mac">💻 检测到Mac设备 - 支持高清手势识别</span>
+                    <span class="device-specific ipad">📱 检测到iPad设备 - 支持触摸和手势控制</span>
+                    <span class="device-specific iphone">📱 检测到iPhone设备 - 优化移动端体验</span>
+                </div>
+                
+                <button class="tutorial-btn" id="startTutorialBtn">
+                    开始手势体验
+                </button>
+                
+                <button class="tutorial-btn skip-tutorial" id="skipTutorialBtn">
+                    跳过教程，直接开始
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 加载界面 -->
+    <div class="loader" id="loader">
+        <div class="spinner"></div>
+        <div class="loader-text" id="loaderText">正在初始化...</div>
+        <div class="loader-subtext" id="loaderSubtext">请允许摄像头权限以使用手势控制</div>
+    </div>
+    
+    <!-- 顶部标题栏 -->
+    <div class="header">
+        <div class="title">🎄 手势控制3D圣诞树</div>
+        <div class="device-status" id="deviceStatus">
+            <i>📱</i> <span>检测设备中...</span>
+        </div>
+    </div>
+    
+    <!-- 3D画布 -->
+    <canvas id="threeCanvas"></canvas>
+    
+    <!-- 摄像头视频流 -->
+    <div class="camera-feed" id="cameraFeed">
+        <video id="input_video" autoplay playsinline></video>
+        <canvas id="output_canvas"></canvas>
+    </div>
+    
+    <!-- 控制面板 -->
+    <div class="controls-panel" id="controlsPanel">
+        <!-- 照片上传 -->
+        <div class="control-group">
+            <h3><i>📸</i> 添加照片到圣诞星</h3>
+            <label class="btn" for="fileInput">
+                <i>➕</i> 选择照片
+            </label>
+            <input type="file" id="fileInput" accept="image/*" multiple style="display: none;">
+        </div>
+        
+        <!-- 音乐控制 -->
+        <div class="control-group">
+            <h3><i>🎵</i> 背景音乐控制</h3>
+            <div class="music-controls">
+                <button class="btn music-btn" id="playBtn" title="播放">▶️</button>
+                <button class="btn music-btn" id="pauseBtn" title="暂停">⏸️</button>
+                <button class="btn music-btn" id="volumeUpBtn" title="增大音量">🔊</button>
+                <button class="btn music-btn" id="volumeDownBtn" title="减小音量">🔉</button>
+            </div>
+        </div>
+        
+        <!-- 手势控制说明 -->
+        <div class="control-group">
+            <h3><i>👆</i> 手势控制说明</h3>
+            <div style="color: rgba(255,255,255,0.7); font-size: 13px; line-height: 1.5;">
+                <p>• <strong>握拳</strong>：粒子聚合为圣诞树</p>
+                <p>• <strong>张手</strong>：粒子散开</p>
+                <p>• <strong>捏合手指</strong>：聚焦照片</p>
+                <p>• <strong>移动手掌</strong>：旋转场景</p>
+                <p style="margin-top: 10px; color: #FFD700; font-size: 12px;">
+                    💡 提示：点击右上角👁️按钮可隐藏界面
+                </p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 手势指示器 -->
+    <div class="gesture-indicator">
+        <div class="gesture-item">
+            <div class="gesture-icon">✊</div>
+            <span>圣诞树</span>
+        </div>
+        <div class="gesture-item">
+            <div class="gesture-icon">👋</div>
+            <span>散开</span>
+        </div>
+        <div class="gesture-item">
+            <div class="gesture-icon">🤏</div>
+            <span>聚焦</span>
+        </div>
+        <div class="gesture-item">
+            <div class="gesture-icon">✋</div>
+            <span>旋转</span>
+        </div>
+    </div>
+    
+    <!-- 隐藏UI按钮 -->
+    <div class="toggle-ui" id="toggleUI" title="隐藏/显示界面">👁️</div>
+    
+    <!-- 错误提示 -->
+    <div class="error-message" id="errorMessage"></div>
+    
+    <!-- 音频元素 -->
+    <audio id="backgroundMusic" loop preload="metadata">
+        <source src="https://assets.mixkit.co/music/preview/mixkit-jingle-bells-311.mp3" type="audio/mpeg">
+    </audio>
+
+    <!-- Three.js脚本 -->
+    <script type="module">
+        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+        import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+
+        class ChristmasTreeApp {
+            constructor() {
+                this.deviceType = this.detectDevice();
+                this.hasSeenTutorial = localStorage.getItem('christmasTree_tutorialSeen') === 'true';
+                this.init();
+            }
+            
+            detectDevice() {
+                const ua = navigator.userAgent;
+                const width = window.innerWidth;
+                
+                // 检测Apple设备
+                const isMac = /Macintosh|MacIntel|MacPPC|Mac68K/.test(ua);
+                const isIPhone = /iPhone/.test(ua);
+                const isIPad = /iPad/.test(ua) || (isMac && navigator.maxTouchPoints > 1);
+                
+                if (isIPhone) return 'iphone';
+                if (isIPad) return 'ipad';
+                if (isMac) return 'mac';
+                
+                // 其他设备根据屏幕尺寸判断
+                if (width <= 768) return 'mobile';
+                if (width <= 1024) return 'tablet';
+                return 'desktop';
+            }
+            
+            async init() {
+                this.updateDeviceStatus();
+                this.setupTutorial();
+                await this.initThreeJS();
+                await this.initMediaPipe();
+                this.setupUIEvents();
+                this.setupCamera();
+                this.startAnimation();
+            }
+            
+            setupTutorial() {
+                // 根据设备类型添加对应class
+                document.body.classList.add(`device-${this.deviceType}`);
+                
+                const tutorialOverlay = document.getElementById('tutorialOverlay');
+                const startBtn = document.getElementById('startTutorialBtn');
+                const skipBtn = document.getElementById('skipTutorialBtn');
+                
+                // 检查是否已经看过教程
+                if (this.hasSeenTutorial) {
+                    tutorialOverlay.style.display = 'none';
+                    return;
+                }
+                
+                // 显示教程
+                setTimeout(() => {
+                    tutorialOverlay.classList.add('active');
+                }, 500);
+                
+                // 开始体验按钮
+                startBtn.addEventListener('click', () => {
+                    this.startTutorial();
+                });
+                
+                // 跳过教程按钮
+                skipBtn.addEventListener('click', () => {
+                    this.skipTutorial();
+                });
+                
+                // 添加设备特定提示
+                this.updateTutorialForDevice();
+            }
+            
+            startTutorial() {
+                const tutorialOverlay = document.getElementById('tutorialOverlay');
+                tutorialOverlay.classList.remove('active');
+                
+                // 标记已看过教程
+                localStorage.setItem('christmasTree_tutorialSeen', 'true');
+                this.hasSeenTutorial = true;
+                
+                // 显示一个简短的提示
+                this.showTutorialTip();
+            }
+            
+            skipTutorial() {
+                const tutorialOverlay = document.getElementById('tutorialOverlay');
+                tutorialOverlay.classList.remove('active');
+                
+                // 标记已看过教程
+                localStorage.setItem('christmasTree_tutorialSeen', 'true');
+                this.hasSeenTutorial = true;
+                
+                // 显示跳过提示
+                setTimeout(() => {
+                    this.showError('已跳过教程，您可以在控制面板中查看手势说明');
+                }, 1000);
+            }
+            
+            showTutorialTip() {
+                const tips = {
+                    'mac': '💻 在Mac上，您可以使用精确的手势控制。将手放在摄像头前，慢慢做出动作。',
+                    'ipad': '📱 在iPad上，您也可以使用触摸控制作为备用。双击屏幕可以隐藏界面。',
+                    'iphone': '📱 在iPhone上，请保持手机稳定，手势动作可以稍微慢一点。'
+                };
+                
+                const tip = tips[this.deviceType] || '请将手放在摄像头前开始手势控制体验';
+                
+                setTimeout(() => {
+                    this.showError(tip);
+                }, 500);
+            }
+            
+            updateTutorialForDevice() {
+                // 根据设备类型更新教程内容
+                const deviceTips = {
+                    'mac': {
+                        title: '💻 Mac设备手势控制',
+                        subtitle: '使用MacBook/iMac前置摄像头进行精确手势识别',
+                        tips: [
+                            '使用前置摄像头，确保脸部光线充足',
+                            '保持手臂伸直，手势在画面中心',
+                            '可以使用鼠标作为备用控制'
+                        ]
+                    },
+                    'ipad': {
+                        title: '📱 iPad设备手势控制',
+                        subtitle: '支持前置和后置摄像头，横屏体验更佳',
+                        tips: [
+                            '建议使用后置摄像头获得更大识别范围',
+                            '可以将iPad放在支架上获得稳定画面',
+                            '支持触摸控制作为备用方案'
+                        ]
+                    },
+                    'iphone': {
+                        title: '📱 iPhone设备手势控制',
+                        subtitle: '优化移动端体验，单手即可操作',
+                        tips: [
+                            '使用前置摄像头，将手机放在稳定位置',
+                            '保持手臂在画面中，避免快速移动',
+                            '可以在控制面板中重新查看教程'
+                        ]
+                    }
+                };
+                
+                const deviceTip = deviceTips[this.deviceType] || deviceTips.mac;
+                const titleEl = document.querySelector('.tutorial-title');
+                const subtitleEl = document.querySelector('.tutorial-subtitle');
+                
+                if (deviceTip) {
+                    titleEl.textContent = deviceTip.title;
+                    subtitleEl.textContent = deviceTip.subtitle;
+                }
+            }
+            
+            updateDeviceStatus() {
+                const statusEl = document.getElementById('deviceStatus');
+                const iconMap = {
+                    'mac': '💻',
+                    'ipad': '📱',
+                    'iphone': '📱',
+                    'desktop': '🖥️',
+                    'tablet': '📟',
+                    'mobile': '📱'
+                };
+                
+                const textMap = {
+                    'mac': 'Mac电脑模式',
+                    'ipad': 'iPad平板模式',
+                    'iphone': 'iPhone手机模式',
+                    'desktop': '桌面模式',
+                    'tablet': '平板模式',
+                    'mobile': '手机模式'
+                };
+                
+                statusEl.innerHTML = `<i>${iconMap[this.deviceType]}</i> <span>${textMap[this.deviceType]}</span>`;
+            }
+            
+            async initThreeJS() {
+                // 创建场景
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0x000000);
+                
+                // 创建相机（根据设备调整）
+                this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                
+                // 根据设备类型调整相机位置
+                const cameraConfigs = {
+                    'mac': { x: 0, y: 3, z: 30 },
+                    'ipad': { x: 0, y: 2, z: 35 },
+                    'iphone': { x: 0, y: 2, z: 40 },
+                    'desktop': { x: 0, y: 3, z: 30 },
+                    'tablet': { x: 0, y: 2, z: 35 },
+                    'mobile': { x: 0, y: 2, z: 40 }
+                };
+                
+                const config = cameraConfigs[this.deviceType] || cameraConfigs.desktop;
+                this.camera.position.set(config.x, config.y, config.z);
+                
+                // 创建渲染器
+                this.renderer = new THREE.WebGLRenderer({
+                    canvas: document.getElementById('threeCanvas'),
+                    antialias: true,
+                    alpha: true,
+                    powerPreference: 'high-performance'
+                });
+                
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.deviceType === 'iphone' ? 2 : 3));
+                this.renderer.shadowMap.enabled = true;
+                this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+                
+                // 添加轨道控制（仅桌面端）
+                if (this.deviceType === 'mac' || this.deviceType === 'desktop') {
+                    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+                    this.controls.enableDamping = true;
+                    this.controls.dampingFactor = 0.05;
+                }
+                
+                // 设置灯光
+                this.setupLights();
+                
+                // 创建粒子系统
+                this.createParticles();
+                
+                // 创建圣诞星
+                this.createChristmasStar();
+                
+                // 窗口大小调整
+                window.addEventListener('resize', () => this.onResize());
+                
+                // 更新加载状态
+                document.getElementById('loaderText').textContent = '正在创建3D场景...';
+            }
+            
+            setupLights() {
+                // 环境光
+                const ambient = new this.THREE.AmbientLight(0xffffff, 0.6);
+                this.scene.add(ambient);
+                
+                // 金色主光源
+                const mainLight = new this.THREE.DirectionalLight(0xFFD700, 1.5);
+                mainLight.position.set(10, 20, 10);
+                mainLight.castShadow = true;
+                this.scene.add(mainLight);
+                
+                // 装饰彩灯
+                const colors = [0xFF0000, 0x00FF00, 0x0000FF, 0xFF00FF, 0xFFFF00, 0x00FFFF];
+                colors.forEach((color, i) => {
+                    const angle = (i / colors.length) * Math.PI * 2;
+                    const radius = 15;
+                    const height = Math.random() * 20 - 5;
+                    
+                    const light = new this.THREE.PointLight(color, 0.8, 20);
+                    light.position.set(
+                        Math.cos(angle) * radius,
+                        height,
+                        Math.sin(angle) * radius
+                    );
+                    this.scene.add(light);
+                    
+                    // 添加发光小球
+                    const sphere = new this.THREE.Mesh(
+                        new this.THREE.SphereGeometry(0.5, 16, 16),
+                        new this.THREE.MeshBasicMaterial({ color: color, emissive: color, emissiveIntensity: 0.5 })
+                    );
+                    sphere.position.copy(light.position);
+                    this.scene.add(sphere);
+                });
+            }
+            
+            createParticles() {
+                // 根据设备性能调整粒子数量
+                const particleCounts = {
+                    'mac': 2000,
+                    'desktop': 2000,
+                    'ipad': 1500,
+                    'tablet': 1500,
+                    'iphone': 1000,
+                    'mobile': 1000
+                };
+                
+                const particleCount = particleCounts[this.deviceType] || 1500;
+                
+                // 创建几何体
+                this.particleGeometry = new THREE.BufferGeometry();
+                const positions = new Float32Array(particleCount * 3);
+                const colors = new Float32Array(particleCount * 3);
+                const sizes = new Float32Array(particleCount);
+                
+                this.particles = [];
+                
+                for (let i = 0; i < particleCount; i++) {
+                    const i3 = i * 3;
+                    const t = i / particleCount;
+                    
+                    // 圣诞树形状的目标位置（圆锥螺旋）
+                    const radius = 10 * (1 - t);
+                    const angle = t * 20 * Math.PI;
+                    const height = 25 * t - 5;
+                    
+                    const targetPosition = new THREE.Vector3(
+                        Math.cos(angle) * radius,
+                        height,
+                        Math.sin(angle) * radius
+                    );
+                    
+                    // 初始随机位置
+                    positions[i3] = (Math.random() - 0.5) * 40;
+                    positions[i3 + 1] = (Math.random() - 0.5) * 40;
+                    positions[i3 + 2] = (Math.random() - 0.5) * 40;
+                    
+                    // 颜色渐变（金色到绿色）
+                    const color = new THREE.Color();
+                    if (t < 0.3) {
+                        // 树顶金色
+                        color.setHSL(0.12, 0.9, 0.6 + t * 0.3);
+                    } else {
+                        // 树身绿色
+                        color.setHSL(0.3 + t * 0.2, 0.9, 0.4);
+                    }
+                    
+                    colors[i3] = color.r;
+                    colors[i3 + 1] = color.g;
+                    colors[i3 + 2] = color.b;
+                    
+                    sizes[i] = 0.5 + Math.random() * 1.5;
+                    
+                    this.particles.push({
+                        position: new THREE.Vector3(positions[i3], positions[i3 + 1], positions[i3 + 2]),
+                        target: targetPosition,
+                        speed: 0.02 + Math.random() * 0.03,
+                        originalTarget: targetPosition.clone()
+                    });
+                }
+                
+                this.particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                this.particleGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+                this.particleGeometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+                
+                const particleMaterial = new THREE.PointsMaterial({
+                    size: 1.5,
+                    vertexColors: true,
+                    transparent: true,
+                    opacity: 0.9,
+                    sizeAttenuation: true,
+                    blending: THREE.AdditiveBlending
+                });
+                
+                this.particleSystem = new THREE.Points(this.particleGeometry, particleMaterial);
+                this.scene.add(this.particleSystem);
+                
+                // 初始化状态
+                this.currentMode = 'tree'; // tree, scatter, focus
+                this.modeTransition = 0;
+                this.handPosition = { x: 0, y: 0 };
+                this.handGesture = 'none';
+                
+                // 照片数组
+                this.photos = [];
+            }
+            
+            createChristmasStar() {
+                // 创建星星几何体
+                const starShape = new THREE.Shape();
+                const spikes = 5;
+                const outerRadius = 1;
+                const innerRadius = 0.4;
+                
+                for (let i = 0; i < spikes * 2; i++) {
+                    const radius = i % 2 === 0 ? outerRadius : innerRadius;
+                    const angle = (i * Math.PI) / spikes - Math.PI / 2;
+                    
+                    const x = Math.cos(angle) * radius;
+                    const y = Math.sin(angle) * radius;
+                    
+                    if (i === 0) starShape.moveTo(x, y);
+                    else starShape.lineTo(x, y);
+                }
+                starShape.closePath();
+                
+                const extrudeSettings = {
+                    depth: 0.2,
+                    bevelEnabled: true,
+                    bevelThickness: 0.1,
+                    bevelSize: 0.1,
+                    bevelSegments: 3
+                };
+                
+                const geometry = new THREE.ExtrudeGeometry(starShape, extrudeSettings);
+                const material = new THREE.MeshPhysicalMaterial({
+                    color: 0xFFD700,
+                    metalness: 0.9,
+                    roughness: 0.1,
+                    emissive: 0xFFA500,
+                    emissiveIntensity: 0.3,
+                    clearcoat: 1,
+                    clearcoatRoughness: 0
+                });
+                
+                this.star = new THREE.Mesh(geometry, material);
+                this.star.position.set(0, 18, 0);
+                this.star.scale.set(3, 3, 3);
+                this.scene.add(this.star);
+            }
+            
+            async initMediaPipe() {
+                document.getElementById('loaderText').textContent = '正在初始化摄像头手势识别...';
+                
+                return new Promise((resolve) => {
+                    const hands = new Hands({
+                        locateFile: (file) => {
+                            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+                        }
+                    });
+                    
+                    hands.setOptions({
+                        maxNumHands: 1,
+                        modelComplexity: 1,
+                        minDetectionConfidence: 0.5,
+                        minTrackingConfidence: 0.5
+                    });
+                    
+                    hands.onResults((results) => {
+                        this.onHandResults(results);
+                    });
+                    
+                    this.hands = hands;
+                    
+                    // 创建摄像头
+                    const camera = new Camera(document.getElementById('input_video'), {
+                        onFrame: async () => {
+                            await this.hands.send({ image: document.getElementById('input_video') });
+                        },
+                        width: 640,
+                        height: 480
+                    });
+                    
+                    camera.start()
+                        .then(() => {
+                            console.log('摄像头启动成功');
+                            document.getElementById('loaderText').textContent = '正在启动摄像头...';
+                            resolve();
+                        })
+                        .catch((error) => {
+                            console.error('摄像头启动失败:', error);
+                            this.showError('摄像头访问失败，请检查权限设置');
+                            document.getElementById('loaderSubtext').textContent = '摄像头访问失败，使用鼠标/触摸控制';
+                            resolve(); // 即使摄像头失败也继续
+                        });
+                });
+            }
+            
+            onHandResults(results) {
+                const video = document.getElementById('input_video');
+                const canvas = document.getElementById('output_canvas');
+                const ctx = canvas.getContext('2d');
+                
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                
+                // 清空画布
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // 绘制摄像头画面
+                ctx.save();
+                ctx.scale(-1, 1);
+                ctx.translate(-canvas.width, 0);
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                ctx.restore();
+                
+                // 绘制手部关键点
+                if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                    for (const landmarks of results.multiHandLandmarks) {
+                        drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 2 });
+                        drawLandmarks(ctx, landmarks, { color: '#FF0000', lineWidth: 1 });
+                        
+                        // 分析手势
+                        this.analyzeGesture(landmarks);
+                    }
+                }
+            }
+            
+            analyzeGesture(landmarks) {
+                // 获取关键点
+                const thumbTip = landmarks[4];
+                const indexTip = landmarks[8];
+                const middleTip = landmarks[12];
+                const ringTip = landmarks[16];
+                const pinkyTip = landmarks[20];
+                const wrist = landmarks[0];
+                
+                // 计算手指到手腕的距离
+                const distances = [
+                    this.distance(thumbTip, wrist),
+                    this.distance(indexTip, wrist),
+                    this.distance(middleTip, wrist),
+                    this.distance(ringTip, wrist),
+                    this.distance(pinkyTip, wrist)
+                ];
+                
+                // 计算平均距离
+                const avgDistance = distances.reduce((a, b) => a + b) / distances.length;
+                
+                // 计算捏合距离（拇指和食指）
+                const pinchDistance = this.distance(thumbTip, indexTip);
+                
+                // 获取手掌中心位置（用于旋转控制）
+                const palmCenter = landmarks[9];
+                this.handPosition = {
+                    x: (palmCenter.x - 0.5) * 2,
+                    y: (palmCenter.y - 0.5) * 2
+                };
+                
+                // 手势识别逻辑
+                if (pinchDistance < 0.05) {
+                    this.handGesture = 'pinch';
+                    this.currentMode = 'focus';
+                    this.modeTransition = 0;
+                } else if (avgDistance < 0.25) {
+                    this.handGesture = 'fist';
+                    this.currentMode = 'tree';
+                    this.modeTransition = 0;
+                } else if (avgDistance > 0.4) {
+                    this.handGesture = 'open';
+                    this.currentMode = 'scatter';
+                    this.modeTransition = 0;
+                } else {
+                    this.handGesture = 'move';
+                }
+                
+                // 更新手势指示器
+                this.updateGestureIndicator();
+            }
+            
+            distance(point1, point2) {
+                const dx = point1.x - point2.x;
+                const dy = point1.y - point2.y;
+                const dz = point1.z - point2.z;
+                return Math.sqrt(dx * dx + dy * dy + dz * dz);
+            }
+            
+            updateGestureIndicator() {
+                const gestures = {
+                    'fist': '✊',
+                    'open': '👋',
+                    'pinch': '🤏',
+                    'move': '✋',
+                    'none': '❓'
+                };
+                
+                const currentIcon = gestures[this.handGesture];
+                if (currentIcon) {
+                    document.querySelectorAll('.gesture-icon')[0].textContent = currentIcon;
+                }
+            }
+            
+            updateParticles() {
+                const positions = this.particleGeometry.attributes.position.array;
+                this.modeTransition = Math.min(1, this.modeTransition + 0.02);
+                
+                for (let i = 0; i < this.particles.length; i++) {
+                    const particle = this.particles[i];
+                    const i3 = i * 3;
+                    
+                    let targetPosition;
+                    
+                    switch (this.currentMode) {
+                        case 'tree':
+                            // 圣诞树形状
+                            targetPosition = particle.originalTarget.clone();
+                            break;
+                            
+                        case 'scatter':
+                            // 散开形状
+                            const angle = (i / this.particles.length) * Math.PI * 2;
+                            const radius = 25;
+                            targetPosition = new THREE.Vector3(
+                                Math.cos(angle) * radius,
+                                Math.sin(angle * 2) * radius * 0.5,
+                                Math.sin(angle) * radius
+                            );
+                            break;
+                            
+                        case 'focus':
+                            // 聚焦模式：围绕照片旋转
+                            if (this.photos.length > 0) {
+                                const photoIndex = i % this.photos.length;
+                                const photo = this.photos[photoIndex];
+                                const angle = (i / this.particles.length) * Math.PI * 2;
+                                const radius = 15;
+                                targetPosition = new THREE.Vector3(
+                                    photo.position.x + Math.cos(angle) * radius,
+                                    photo.position.y + Math.sin(angle) * radius * 0.5,
+                                    photo.position.z + Math.sin(angle) * radius
+                                );
+                            } else {
+                                targetPosition = particle.originalTarget.clone();
+                            }
+                            break;
+                    }
+                    
+                    // 平滑过渡到目标位置
+                    particle.position.lerp(targetPosition, particle.speed);
+                    
+                    // 添加手部旋转控制
+                    if (this.handGesture === 'move' && this.currentMode !== 'tree') {
+                        const rotationSpeed = 0.005;
+                        particle.position.x += this.handPosition.x * rotationSpeed * 10;
+                        particle.position.z += this.handPosition.y * rotationSpeed * 10;
+                    }
+                    
+                    // 添加轻微浮动效果
+                    const time = Date.now() * 0.001;
+                    particle.position.y += Math.sin(time + i * 0.01) * 0.05;
+                    
+                    // 更新位置数组
+                    positions[i3] = particle.position.x;
+                    positions[i3 + 1] = particle.position.y;
+                    positions[i3 + 2] = particle.position.z;
+                }
+                
+                this.particleGeometry.attributes.position.needsUpdate = true;
+                
+                // 更新圣诞星动画
+                if (this.star) {
+                    this.star.rotation.y += 0.01;
+                    this.star.position.y = 18 + Math.sin(Date.now() * 0.001) * 0.5;
+                }
+                
+                // 更新照片动画
+                this.photos.forEach((photo, index) => {
+                    photo.rotation.y += 0.005;
+                    const time = Date.now() * 0.001 + index;
+                    photo.position.y += Math.sin(time) * 0.03;
+                });
+            }
+            
+            setupCamera() {
+                // 根据设备类型调整摄像头显示
+                const cameraFeed = document.getElementById('cameraFeed');
+                
+                if (this.deviceType === 'iphone' || this.deviceType === 'mobile') {
+                    cameraFeed.style.width = '120px';
+                    cameraFeed.style.height = '90px';
+                    cameraFeed.style.top = '60px';
+                    cameraFeed.style.right = '10px';
+                } else if (this.deviceType === 'ipad' || this.deviceType === 'tablet') {
+                    cameraFeed.style.width = '200px';
+                    cameraFeed.style.height = '150px';
+                    cameraFeed.style.top = '80px';
+                    cameraFeed.style.right = '20px';
+                } else {
+                    cameraFeed.style.width = '240px';
+                    cameraFeed.style.height = '180px';
+                    cameraFeed.style.top = '80px';
+                    cameraFeed.style.right = '20px';
+                }
+            }
+            
+            setupUIEvents() {
+                // 照片上传
+                document.getElementById('fileInput').addEventListener('change', (e) => {
+                    this.handlePhotoUpload(e.target.files);
+                });
+                
+                // 音乐控制
+                const audio = document.getElementById('backgroundMusic');
+                audio.volume = 0.3;
+                
+                document.getElementById('playBtn').addEventListener('click', () => {
+                    audio.play().catch(e => console.log('音频需要用户交互'));
+                });
+                
+                document.getElementById('pauseBtn').addEventListener('click', () => {
+                    audio.pause();
+                });
+                
+                document.getElementById('volumeUpBtn').addEventListener('click', () => {
+                    audio.volume = Math.min(1, audio.volume + 0.1);
+                });
+                
+                document.getElementById('volumeDownBtn').addEventListener('click', () => {
+                    audio.volume = Math.max(0, audio.volume - 0.1);
+                });
+                
+                // 隐藏/显示UI
+                document.getElementById('toggleUI').addEventListener('click', () => {
+                    const controls = document.getElementById('controlsPanel');
+                    const gestureIndicator = document.querySelector('.gesture-indicator');
+                    const cameraFeed = document.getElementById('cameraFeed');
+                    
+                    controls.style.opacity = controls.style.opacity === '0' ? '1' : '0';
+                    controls.style.pointerEvents = controls.style.opacity === '0' ? 'none' : 'auto';
+                    
+                    gestureIndicator.style.opacity = gestureIndicator.style.opacity === '0' ? '1' : '0';
+                    cameraFeed.style.opacity = cameraFeed.style.opacity === '0' ? '1' : '0';
+                });
+                
+                // 点击页面任意位置播放音乐（需要用户交互）
+                document.addEventListener('click', () => {
+                    audio.play().catch(e => console.log('音频将在用户交互后播放'));
+                }, { once: true });
+                
+                // 移除加载界面
+                setTimeout(() => {
+                    document.getElementById('loader').style.opacity = '0';
+                    setTimeout(() => {
+                        document.getElementById('loader').style.display = 'none';
+                    }, 500);
+                }, 3000);
+                
+                // 重新显示教程按钮
+                const showTutorialBtn = document.createElement('button');
+                showTutorialBtn.className = 'btn';
+                showTutorialBtn.innerHTML = '<i>📖</i> 重新显示教程';
+                showTutorialBtn.style.marginTop = '10px';
+                showTutorialBtn.addEventListener('click', () => {
+                    localStorage.removeItem('christmasTree_tutorialSeen');
+                    window.location.reload();
+                });
+                
+                document.querySelector('.control-group:last-child').appendChild(showTutorialBtn);
+            }
+            
+            handlePhotoUpload(files) {
+                for (let file of files) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const textureLoader = new THREE.TextureLoader();
+                        textureLoader.load(e.target.result, (texture) => {
+                            texture.colorSpace = THREE.SRGBColorSpace;
+                            
+                            // 创建照片平面
+                            const geometry = new THREE.PlaneGeometry(3, 3);
+                            const material = new THREE.MeshBasicMaterial({
+                                map: texture,
+                                transparent: true,
+                                side: THREE.DoubleSide
+                            });
+                            
+                            const photo = new THREE.Mesh(geometry, material);
+                            
+                            // 随机放置在圣诞树周围
+                            const angle = Math.random() * Math.PI * 2;
+                            const radius = 8 + Math.random() * 10;
+                            const height = Math.random() * 15;
+                            
+                            photo.position.set(
+                                Math.cos(angle) * radius,
+                                height,
+                                Math.sin(angle) * radius
+                            );
+                            
+                            // 朝向中心
+                            photo.lookAt(0, height, 0);
+                            
+                            this.scene.add(photo);
+                            this.photos.push(photo);
+                            
+                            // 如果是第一张照片，放在圣诞星位置
+                            if (this.photos.length === 1) {
+                                photo.position.set(0, 18, 0);
+                                photo.scale.set(1.5, 1.5, 1.5);
+                            }
+                        });
+                    };
+                    reader.readAsDataURL(file);
+                }
+            }
+            
+            startAnimation() {
+                const animate = () => {
+                    requestAnimationFrame(animate);
+                    
+                    // 更新粒子
+                    this.updateParticles();
+                    
+                    // 更新轨道控制
+                    if (this.controls) {
+                        this.controls.update();
+                    }
+                    
+                    // 渲染场景
+                    this.renderer.render(this.scene, this.camera);
+                };
+                
+                animate();
+            }
+            
+            onResize() {
+                this.camera.aspect = window.innerWidth / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.deviceType === 'iphone' ? 2 : 3));
+                
+                this.setupCamera();
+            }
+            
+            showError(message) {
+                const errorEl = document.getElementById('errorMessage');
+                errorEl.textContent = message;
+                errorEl.style.display = 'block';
+                
+                setTimeout(() => {
+                    errorEl.style.display = 'none';
+                }, 5000);
+            }
+        }
+        
+        // 启动应用
+        const app = new ChristmasTreeApp();
+    </script>
+</body>
+</html>
